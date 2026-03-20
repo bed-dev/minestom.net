@@ -1,90 +1,106 @@
-# Map rendering
+# Map Rendering
 
 ## Introduction
 
-Minecraft maps usually hold a 128x128 image representing an aerial view of an area. This is done by saving a 128x128 image inside the map data and rendering it.
+Minecraft maps display a 128x128 image. While originally intended for aerial views, Minestom allows you to render arbitrary pixel data onto maps, enabling custom GUIs, images, or dynamic displays.
 
-The thing is... the server decides the contents, and there is no requirement to show an aerial view. This means that maps can serve as arbitrary 128x128 textures which can then be used for custom blocks, graphics and more.
+## Map Colors
 
-## Writing map data - Low level API
+Map pixels are not standard RGB. They are indices pointing to a specific palette of colors defined by Minecraft.
 
-Minestom does not save map data for you, but it will send it for you. At the most basic level, map framebuffers (the 128x128 pixel area the server draws on) hold the 1-byte indices of colors in a pre-determined color palette, but not RGB.
-
-Once you have selected a map ID to write to (see [MapMeta](https://github.com/Minestom/Minestom/blob/master/src/main/java/net/minestom/server/item/metadata/MapMeta.java) for more information), you can write its contents via a `MapDataPacket`:
+The `MapColors` class provides utilities to find the closest map color index for a given RGB value.
 
 ```java
-MapDataPacket mapData = new MapDataPacket();
-mapData.mapId = YOUR_MAP_ID;
-mapData.data = YOUR_PIXELS;
-mapData.x = X_START;
-mapData.z = Z_START;
-mapData.rows = ROW_COUNT;
-mapData.columns = COLUMN_COUNT;
+import net.minestom.server.map.MapColors;
+
+// Get the closest map color index for a specific RGB
+byte colorIndex = MapColors.closestColor(255, 0, 0); // Red
 ```
 
-- `mapId` is an `int` to be able to reference which map to change.
-- `data` is a `byte[]` array which holds the indices inside the color palette. Its size should be at least `rows*columns`.
-- `x` is an unsigned byte (stored inside a `short`) which represents the X coordinate of the left-most pixel to write. Ranges from 0 to 127 (inclusive).
-- `y` is an unsigned byte (stored inside a `short`) which represents the Y coordinate of the top-most pixel to write. Ranges from 0 to 127 (inclusive).
-- `rows` is an unsigned byte (stored inside a `short`) which represents the number of rows to update.
-- `columns` is an unsigned byte (stored inside a `short`) which represents the number of columns to update.
+## Framebuffers
 
-Pixels are stored in a row-major configuration (ie index is defined by `x+width*y`). Attempting to write pixels outside the 128x128 area WILL crash and/or disconnect the client, so be careful. Minestom does not check which area you are writing to.
+Writing raw byte arrays for map data is tedious. Minestom provides `Framebuffer` to handle drawing operations.
 
-You can then send the packet to players through `PlayerConnection#sendPacket(ServerPacket)`
-
-## Framebuffers - High level API
-
-While directly writing to the pixel buffer is fast and easy for simple graphics, it is rapidly cumbersome to write each pixel individually. For this reason, Minestom provides framebuffers: a high-level API for rendering onto maps.
-
-Framebuffers are split into 2 categories: `Framebuffer` and `LargeFramebuffer`. The difference is that `Framebuffer` is meant to render to a single map (so resolution limited to 128x128), while `LargeFramebuffer` can render to any framebuffer size, by rendering over multiple maps. Large framebuffers offer a method to create `Framebuffer` views to help with rendering onto a map.
-
-Once you have finished rendering on your framebuffer, you can ask it to prepare the `MapDataPacket` for you.
+### Creating a Framebuffer
 
 ```java
-MapDataPacket mapData = new MapDataPacket();
-mapData.mapId = YOUR_MAP_ID;
-Framebuffer fb = //...
-// some render code
-fb.preparePacket(packet);
+import net.minestom.server.map.Framebuffer;
+
+Framebuffer framebuffer = new Framebuffer(128, 128);
 ```
 
-Framebuffers have 3 default flavors provided by Minestom: Direct, Graphics2D and GLFW-Capable.
+### Drawing
 
-### `DirectFramebuffer` / `LargeDirectFramebuffer`
-
-Direct framebuffers are very close to writing directly the pixel buffer inside `MapDataPacket`. They hold an internal `byte[]` representing the colors on the map, which can be accessed and modified through `get` and `set` respectively. The entire internal buffer is also exposed via `getColors()` (you can modify it from the returned value).
-
-Example use:
+You can set individual pixels or bulk data.
 
 ```java
-DirectFramebuffer fb = new DirectFramebuffer();
-byte[] colors = fb.getColors();
-for (int i = 0; i < colors.length; i++) {
-    colors[i] = MapColors.COLOR_CYAN.baseColor();
+// Set a single pixel at (x, y)
+framebuffer.set(10, 10, MapColors.DIAMOND_BLUE);
+
+// Draw a rectangle (manual loop or utility)
+for (int x = 0; x < 20; x++) {
+    for (int y = 0; y < 20; y++) {
+        framebuffer.set(x, y, MapColors.EMERALD_GREEN);
+    }
 }
-fb.set(0,0, MapColors.DIRT.baseColor());
 ```
 
-### `Graphics2DFramebuffer` / `LargeGraphics2DFramebuffer`
+### Sending to Player
 
-_These framebuffers require a conversion from RGB to MapColors. This is done automatically by Minestom but can seriously impact rendering performance when the resolution increases._
+Once you have drawn your content, you need to send it to the player. This is done via `MapDataPacket`.
 
-As the name suggests, these framebuffers allow usage of the Graphics2D API from the AWT library included in the Java standard library. Access the `Graphics2D` object through `getRenderer()` and render your content on it.
-
-Example use:
+First, you need a map item with a specific ID.
 
 ```java
-Graphics2D renderer = framebuffer.getRenderer();
-renderer.setColor(Color.BLACK);
-renderer.clearRect(0, 0, 128, 128);
-renderer.setColor(Color.WHITE);
-renderer.drawString("Hello from", 0, 10);
-renderer.drawString("Graphics2D!", 0, 20);
+ItemStack mapItem = ItemStack.of(Material.FILLED_MAP)
+    .withMeta(MapMeta.class, meta -> meta.mapId(100));
+
+player.getInventory().setItemInMainHand(mapItem);
 ```
 
-Graphics2D framebuffers also support getting/setting pixels individually if necessary.
+Then, send the packet updating map ID 100.
 
-### GLFW-Capable buffers
+```java
+import net.minestom.server.network.packet.server.play.MapDataPacket;
 
-[This is an article all to itself.](./map-rendering/glfwmaprendering)
+MapDataPacket packet = framebuffer.preparePacket(100);
+
+player.sendPacket(packet);
+```
+
+## Large Framebuffers
+
+`LargeFramebuffer` allows you to create images larger than 128x128. They logicaly represent a grid of standard maps.
+
+```java
+import net.minestom.server.map.LargeFramebuffer;
+
+// 2x2 maps (256x256 pixels)
+LargeFramebuffer largeFramebuffer = new LargeFramebuffer(256, 256);
+
+// Draw large image...
+// ...
+
+// Get a specific 128x128 view (e.g., top-left map)
+Framebuffer view = largeFramebuffer.createSubView(0, 0);
+```
+
+## Images
+
+You can load standard images (PNG, JPEG) and render them onto a framebuffer.
+
+```java
+import javax.imageio.ImageIO;
+import java.awt.image.BufferedImage;
+
+BufferedImage image = ImageIO.read(new File("image.png"));
+
+// Resize needs to be handled manually or via Java AWT/Graphics2D before writing to framebuffer if needed
+for (int x = 0; x < 128; x++) {
+    for (int y = 0; y < 128; y++) {
+        int rgb = image.getRGB(x, y);
+        byte color = MapColors.closestColor(rgb);
+        framebuffer.set(x, y, color);
+    }
+}
+```

@@ -1,24 +1,93 @@
 # Schedulers
 
-A `Scheduler` is an object able to schedule tasks based on a condition (time, tick rate, future, etc...) with a precision linked to its ticking rate. It is therefore important to remember that Minestom scheduling API does not aim to replace JDK's executor services which should still be used if you do not need our scheduling guarantee (execution in the caller thread, execution based on tick, less overhead).
+Minestom has a powerful scheduling API designed to work in sync with the server tick loop.
 
-Those tasks scheduling can be configured using a `TaskSchedule` object, defining when the task is supposed to execute.
+## Overview
+
+The `Scheduler` allows you to schedule tasks that run either immediately, after a delay, or repeatedly. Each entity and instance has its own scheduler, and there is also a global server scheduler.
 
 ```java
-Scheduler scheduler = MinecraftServer.getSchedulerManager();
-scheduler.scheduleNextTick(() -> System.out.println("Hey!"));
-scheduler.submitTask(() -> {
-    System.out.println("Running directly and then every second!");
-    return TaskSchedule.seconds(1);
-});
+import net.minestom.server.timer.TaskSchedule;
+import net.minestom.server.MinecraftServer;
+
+// Global scheduler
+MinecraftServer.getSchedulerManager().buildTask(() -> {
+    System.out.println("Hello from scheduler!");
+}).schedule();
 ```
 
-Tasks are by default executed synchronously (in the object ticking thread). Async execution is possible, but you may consider using a third party solution.
+## Scheduling Tasks
 
-Scheduling will give you a `Task` object, giving you an overview of the task state, and allow some modification such as cancelling.
+Tasks are configured using `TaskSchedule` which defines when they run.
+
+### Delayed Task
 
 ```java
-Scheduler scheduler = player.scheduler();
-Task task = scheduler.scheduleNextTick(() -> System.out.println("Hey!"));
+// Run after 5 seconds
+scheduler.buildTask(() -> {
+    System.out.println("Delayed task");
+}).delay(TaskSchedule.seconds(5)).schedule();
+```
+
+### Repeating Task
+
+```java
+// Run every tick (50ms)
+scheduler.buildTask(() -> {
+    System.out.println("Tick task");
+}).repeat(TaskSchedule.tick(1)).schedule();
+```
+
+### Combined (Delay + Repeat)
+
+```java
+// Wait 10 seconds, then run every minute
+scheduler.buildTask(() -> {
+    System.out.println("Recurring task");
+})
+.delay(TaskSchedule.seconds(10))
+.repeat(TaskSchedule.minutes(1))
+.schedule();
+```
+
+## Task Ownership
+
+It is best practice to use the scheduler of the object you are modifying.
+
+- **Entity Scheduler**: Tasks are automatically cancelled if the entity is removed.
+- **Instance Scheduler**: Tasks are cancelled if the instance is unregistered.
+
+```java
+entity.scheduler().buildTask(() -> {
+    // This is safe! If entity is removed, this task stops.
+    entity.teleport(position);
+}).repeat(TaskSchedule.tick(1)).schedule();
+```
+
+## Task Management
+
+When you schedule a task, you get a `Task` object which allows you to cancel it or check its status.
+
+```java
+Task task = scheduler.buildTask(...).schedule();
+
+// Cancel later
 task.cancel();
+
+// Check if alive
+boolean alive = task.isAlive();
+```
+
+## Execution Type
+
+By default, scheduled tasks run on the server thread (sync). You can run tasks async using `ExecutionType.ASYNC`.
+
+```java
+import net.minestom.server.timer.ExecutionType;
+
+scheduler.buildTask(() -> {
+    // Heavy calculation off the main thread
+})
+.executionType(ExecutionType.ASYNC)
+.schedule();
 ```

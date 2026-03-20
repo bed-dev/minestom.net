@@ -1,52 +1,77 @@
 # Advancements
 
-The advancement API is based around `AdvancementTab`s which represent a tree of `Advancement`s for one or more players. Each player viewing a single `AdvancementTab` will see the same progress as all the others. If per player `Advancement`s are needed, individual `AdvancementTab`s will need to be created.
+Minestom allows you to create custom advancement tabs and notifications.
 
-`Advancement`s represent a completable advancement in an `AdvancementTab`.
+## Creating an Advancement
 
-## AdvancementTab
-
-`AdvancementTab`s can be created and retrieved from the `AdvancementManager`.
+Advancements are immutable objects.
 
 ```java
-// Create
-AdvancementManager#createTab(String /* namespaced id */, AdvancementRoot);
+import net.minestom.server.advancements.Advancement;
+import net.minestom.server.advancements.FrameType;
+import net.minestom.server.item.Material;
+import net.kyori.adventure.text.Component;
 
-// Retrieve
-AdvancementManager#getTab(String /* namespaced id */);
+Advancement advancement = new Advancement(
+    Component.text("My Advancement"),
+    Component.text("Description"),
+    Material.DIAMOND,
+    FrameType.TASK,
+    false, // Show toast
+    false, // Hidden
+    false  // Announce to chat
+);
+
+// Set background only for root
+advancement.setBackground("minecraft:textures/gui/advancements/backgrounds/stone.png");
 ```
 
-> Namespaced IDs follow the format of `namespace:id`, and may not have any upper case letters.
+## Creating a Tab
 
-An `AdvancementRoot` is the origin `Advancement` for a tab, and has the same creation method as a regular `Advancement` (see below) except the background. A background is a reference to a texture file on the client, for example `minecraft:textures/block/stone.png` for stone block.
+Advancements are organized into tabs. A player views one tab at a time.
 
 ```java
-AdvancementRoot#<init>(Component, Component, Material, FrameType, int, int, String /* background */);
+import net.minestom.server.advancements.AdvancementTab;
+import net.minestom.server.advancements.AdvancementRoot;
+
+// You need a root advancement for the tab
+AdvancementRoot root = new AdvancementRoot(advancement);
+
+AdvancementTab tab = new AdvancementTab("minestom:my_tab", root);
+
+// Add children
+Advancement child = new Advancement(
+    Component.text("Child"),
+    Component.text("Desc"),
+    Material.STICK,
+    FrameType.GOAL,
+    true, false, true
+);
+
+tab.createAdvancement("minestom:child", child, root);
 ```
 
-Once created, an `AdvancementTab` may be added and removed from players as follows:
+## Showing to Players
+
+Each `AdvancementTab` stores who can see it.
 
 ```java
-AdvancementTab#addViewer(Player);
-AdvancementTab#removeViewer(Player);
+tab.addViewer(player);
 ```
 
-## Advancement
+## Notifications (Toast)
 
-`Advancement`s can be created with their constructor and added to an `AdvancementTab` with an associated parent.
+You can send a toast notification without adding an advancement to a tab permanently.
 
 ```java
-Advancement#<init>(Component /* title */, Component /* description */, Material, FrameType, int /* x */, int /* y */);
+import net.minestom.server.advancements.Notification;
 
-AdvancementTab#createAdvancement(String /* namespaced id */, Advancement /* to add */, Advancement /* parent */);
+Notification notification = new Notification(
+    Component.text("Unlock!"),
+    FrameType.CHALLENGE,
+    Material.GOLD_INGOT
+);
+
+player.sendNotification(notification);
 ```
 
-> The parent of an `Advancement` may not be null, and it must have been added to the tab already. The `AdvancementRoot` is a valid parent.
-
-Once an `Advancement` is registered, it can be completed.
-
-```java
-Advancement#setAchieved(Boolean);
-```
-
-> To make an advancement show a toast, use `Advancement#showToast(Boolean)` before setting it to be achieved.

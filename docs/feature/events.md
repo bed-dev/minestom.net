@@ -1,127 +1,126 @@
 # Events
 
-## Overview
+Minestom's event system is designed to be highly scalable and flexible, utilizing an event graph structure where events propagate through "Nodes".
 
-Event listening is a fairly hard part to keep easy while having a clear understanding of the execution flow. In Minestom, a tree is used to define inheritance for filtering and extensibility. Each node of the tree contains:
+## Understanding the Event Graph
 
-- Event class, where only subclasses are allowed to enter (`Event`/`PlayerEvent`/etc...)
-- Condition for filtering
-- List of listeners
-- Name for identification
-- Priority
+Events traverse through a tree structure. The root of this tree is the `GlobalEventHandler`.
 
-![Event tree with all nodes being executed](/docs/feature/events/event-tree.gif)
+- **GlobalEventHandler**: The top-level handler. All events start here (unless scoped specifically).
+- **EventNode**: A node in the graph. It can have children and listeners.
+- **EventFilter**: Defines what *type* of events a node accepts (e.g., `EventFilter.PLAYER`, `EventFilter.ENTITY`).
 
-The tree structure provides us many advantages:
+When an event is fired, it starts at the Global handler and flows down to any child nodes whose filter matches the event type and whose condition (if any) is met.
 
-- Context-aware listeners due to node filtering
-- Clear execution order
-- Ability to store the event tree as an image for documentation purpose
-- Listener injection into existing nodes
+## Listening to Events
 
-## API
-
-### Node
+The simplest way is to register a listener on the global handler.
 
 ```java
-// Can listen to any Event, without any condition
-EventNode<Event> node = EventNode.all("demo");
-// Can only listen to entity events
-EventNode<EntityEvent> entityNode = EventNode.type("entity-listener", EventFilter.ENTITY);
-// Can only listen to player events
-EventNode<PlayerEvent> playerNode = EventNode.type("player-listener", EventFilter.PLAYER);
-// Listen to player events with the player in creative mode
-EventNode<PlayerEvent> creativeNode = EventNode.value("creative-listener", EventFilter.PLAYER, player -> player.getGameMode().equals(GameMode.CREATIVE));
-```
+import net.minestom.server.MinecraftServer;
+import net.minestom.server.event.GlobalEventHandler;
+import net.minestom.server.event.player.PlayerLoginEvent;
 
-Each node needs a name to be debuggable and be retrieved later on, an `EventFilter` containing the event type target and a way to retrieve its actor (i.e. a `Player` from a `PlayerEvent`). All factory methods accept a predicate to provide an additional condition for filtering purposes.
+GlobalEventHandler globalEventHandler = MinecraftServer.getGlobalEventHandler();
 
-### Listener
-
-```java
-EventNode<Event> node = EventNode.all("demo");
-node.addListener(EntityTickEvent.class, event -> {
-    // Inline listener
+globalEventHandler.addListener(PlayerLoginEvent.class, event -> {
+    event.setSpawningInstance(myInstance);
+    // event.getPlayer() refers to the player logging in
 });
-node.addListener(EventListener.builder(EntityTickEvent.class)
-    .expireCount(50) // Stop after 50 executions
-    .expireWhen(event -> event.getEntity().isGlowing()) // Stop once the predicate returns true
-    .handler(entityTickEvent ->
-        System.out.println("Entity tick!"))
-    .build());
-
-EventNode<PlayerEvent> playerNode = EventNode.type("player-listener", EventFilter.PLAYER);
-// playerNode.addListener(EntityTickEvent.class, event -> {}); -> does not work as playerNode only accept player events
-playerNode.addListener(PlayerTickEvent.class, event -> {});
 ```
 
-### Child
+## Determining Scope (EventContext)
 
-Children take the condition of their parent and are able to append to it.
+Minestom events are "context-aware". This means an event knows if it belongs to a specific instance or entity.
+
+- **Instance Scope**: Events related to blocks or world interactions are scoped to an `Instance`.
+- **Entity Scope**: Events related to damage, movement, or interaction are scoped to an `Entity`.
+
+This allows objects like `Instance` and `Entity` to have their own event handlers that only receive relevant events.
 
 ```java
-EventNode<Event> node = EventNode.all("demo");
-EventNode<PlayerEvent> playerNode = EventNode.type("player-listener", EventFilter.PLAYER);
+// This listener will ONLY receive block break events happening in 'myInstance'
+myInstance.eventNode().addListener(PlayerBlockBreakEvent.class, event -> {
+    // ...
+});
 
-node.addChild(playerNode); // Works as PlayerEvent is also an Event
-
-// playerNode.addChild(node); -> Doesn't compile as the parent would be more restrictive than the child
+// This listener will ONLY receive damage events for 'myEntity'
+myEntity.eventNode().addListener(EntityDamageEvent.class, event -> {
+    // ...
+});
 ```
 
-### Event execution
+## Creating Complex Event Structures
 
-Events can be executed from anywhere, not only the root node.
+You can create your own `EventNode`s to organize your plugin/server logic. This is highly recommended for performance and organization.
 
 ```java
-EventNode<Event> node = EventNode.all("demo");
-node.call(new MyEvent());
+import net.minestom.server.event.EventNode;
+import net.minestom.server.event.EventFilter;
+
+// Create a node that only processes events for players in Creative Mode
+EventNode<PlayerEvent> creativeNode = EventNode.value("creative-mode-filter", EventFilter.PLAYER, Player::isCreative);
+
+// Add a listener to this node
+creativeNode.addListener(PlayerBlockBreakEvent.class, event -> {
+    // This code only runs if the player is in creative mode
+});
+
+// Attach the node to the global handler
+MinecraftServer.getGlobalEventHandler().addChild(creativeNode);
 ```
 
-## In practice
+### Why use Nodes?
 
-Now that you are familiar with the API, here is how you should use it inside your Minestom project.
+1.  **Performance**: If the node condition (`Player::isCreative`) returns false, Minestom skips checking all listeners inside that node.
+2.  **Organization**: You can group all listeners for a specific minigame or feature under one node and register/unregister the whole node at once.
 
-### Node to use
+## Custom Events
 
-#### Server JAR
-
-The root node of the server can be retrieved using `MinecraftServer#getGlobalEventHandler()`, you can safely insert new nodes.
+You can create your own events.
 
 ```java
-var handler = MinecraftServer.getGlobalEventHandler();
-handler.addListener(PlayerChatEvent.class,
-        event -> event.getPlayer().sendMessage("You sent a message!"));
-var node = EventNode.all("demo");
-node.addListener(PlayerMoveEvent.class,
-        event -> event.getPlayer().sendMessage("You moved!"));
-handler.addChild(node);
+import net.minestom.server.event.trait.CancellableEvent;
+
+public class GameStartEvent implements CancellableEvent {
+    private boolean cancelled;
+    private final String gameData;
+
+    public GameStartEvent(String gameData) {
+        this.gameData = gameData;
+    }
+
+    public String getGameData() { return gameData; }
+
+    @Override
+    public boolean isCancelled() { return cancelled; }
+
+    @Override
+    public void setCancelled(boolean cancel) { this.cancelled = cancel; }
+}
 ```
 
-### Structure
-
-Having an image of your tree is highly recommended, for documentation purposes and ensuring an optimal filtering path. It is then possible to use packages for major nodes, and classes for minor filtering.
+Calling the event:
 
 ```java
-Server/
-   Global.java
-   Lobby/
-      Rank/
-         - AdminRank.java
-         - VipRank.java
-      - DefaultRank.java
-   Game/
-      Bedwars/
-         Kit/
-            PvpKit.java
-            BuildKit.java
-         Bedwars.java
-      Skywars/
-         Kit/
-            PvpKit.java
-            BuildKit.java
-         Skywars.java
+GameStartEvent event = new GameStartEvent("Spleef");
+MinecraftServer.getGlobalEventHandler().call(event);
+
+if (!event.isCancelled()) {
+    // Start the game
+}
 ```
 
-### Custom event
+## Listener Builder
 
-`Event` is an interface that you can freely implement, traits like `CancellableEvent` (to stop the execution after a certain point) and `EntityEvent` (telling the dispatcher that the event contains an entity actor) are also present to ensure your code will work with existing logic. You can then choose to run your custom event from an arbitrary node (see [example](#event-execution)), or from the root with `EventDispatcher#call(Event)`.
+For one-off listeners with expiration or specific filters:
+
+```java
+var listener = EventListener.builder(PlayerMoveEvent.class)
+    .expireCount(1) // Run only once
+    .handler(event -> System.out.println("First move!"))
+    .build();
+
+globalEventHandler.addListener(listener);
+```
+

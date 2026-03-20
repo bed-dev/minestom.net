@@ -1,37 +1,31 @@
----
-description: >-
-  This page describes what you need to know about chunks management, more
-  specifically for InstanceContainer
----
+# Chunk Management
 
-# Chunk management
+Minestom handles chunks dynamically.
 
-## Load/Save Steps
+## Loading Chunks
 
-When trying to load a chunk, the instance container does multiple checks in this order:
+By default, chunks are loaded automatically when players move (if `enableAutoChunkLoad(true)` is set on the instance settings).
 
-1. Verify if the chunk is already loaded (stop here if yes)
-2. Try to load the chunk from the instance [ChunkLoader](https://javadoc.minestom.net/net.minestom.server/net/minestom/server/instance/ChunkLoader.html) using [ChunkLoader#loadChunk](<https://javadoc.minestom.net/net.minestom.server/net/minestom/server/instance/ChunkLoader.html#loadInstance(net.minestom.server.instance.Instance)>) (stop here if the chunk loading is successful)
-3. Create a new chunk and execute the instance ChunkGenerator (if any) to it to generate all the chunk's blocks.
-
-When trying to save a chunk, [ChunkLoader#saveChunk](<https://javadoc.minestom.net/net.minestom.server/net/minestom/server/instance/ChunkLoader.html#saveChunk(net.minestom.server.instance.Chunk)>) is called.
-
-### Default behavior
-
-`AnvilLoader` is the default chunk loader used by all `InstanceContainer`
-
-## Create your own chunk type
-
-[Chunk](https://javadoc.minestom.net/net.minestom.server/net/minestom/server/instance/Chunk.html) is an abstract class, you can simply create a new class extending it to create your own implementation.
-
-Making your own chunk implementation allows you to customize how you want blocks to be stored, how you want chunks tick to happen, etc...
-
-### How to make my instance use my implementation
-
-If you are using a simple [InstanceContainer](https://javadoc.minestom.net/net.minestom.server/net/minestom/server/instance/InstanceContainer.html) you will just need to change the instance's chunk supplier
+You can also manually load chunks.
 
 ```java
-instanceContainer.setChunkSupplier(YOUR_CHUNK_SUPPLIER);
+CompletableFuture<Chunk> future = instance.loadChunk(chunkX, chunkZ);
+future.join(); // Block until loaded (avoid on main thread)
 ```
 
-It will be called when a chunk object needs to be provided.
+## Unloading Chunks
+
+Chunks are also unloaded automatically to save memory. You can force unload a chunk if needed.
+
+```java
+instance.unloadChunk(chunk);
+```
+
+## Custom Chunk Systems
+
+You can override how chunks are supplied by implementing `ChunkSupplier`.
+
+```java
+instance.setChunkSupplier((instance, chunkX, chunkZ) -> new MyCustomChunk(instance, chunkX, chunkZ));
+```
+

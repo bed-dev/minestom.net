@@ -1,149 +1,174 @@
 # Commands
 
-Commands are the main communication between the server and the players. In contrary to current alternatives, Minestom takes full advantage of auto-completion/suggestion and has therefore a fairly strict API.
+Commands are the main communication channel between the server and players (or console). Minestom provides a powerful, Brigadier-compatible command system with full support for auto-completion, suggestions, and complex parsing.
 
-## Overview
+## Basic Structure
 
-All auto-completable commands should extend `Command`, each command is composed of zero or multiple syntaxes, and each syntax is composed of one or more arguments.
-
-If you find it confusing, here are a few examples:
+All custom commands extend the `Command` class.
 
 ```java
-/health // This is a command
-/health set 50; // This is a command and its syntax
-set // This is a literal argument
-~ ~ ~ // This is a position argument
-```
-
-## Create your first command
-
-First of all, create your command class!
-
-```java
-package demo.commands;
-
-import net.minestom.server.command.builder.Command;
-
-public class TestCommand extends Command {
-
-    public TestCommand() {
-        super("my-command", "hey");
-        // "my-command" is the main name of the command
-        // "hey" is an alias, you can have an unlimited number of those
-    }
-}
-```
-
-After this is done, you need to register the command.
-
-```java
-MinecraftServer.getCommandManager().register(new TestCommand());
-```
-
-Nothing crazy so far, let's create a callback once the command is run without any argument and another for our custom syntax.
-
-```java
-package demo.commands;
-
 import net.minestom.server.command.builder.Command;
 import net.minestom.server.command.builder.arguments.ArgumentType;
 
-public class TestCommand extends Command {
+public class MyCommand extends Command {
 
-    public TestCommand() {
-        super("command", "alias");
+    public MyCommand() {
+        super("mycommand", "alias1", "alias2");
 
-        // Executed if no other executor can be used
+        // default execution (no arguments)
         setDefaultExecutor((sender, context) -> {
-            sender.sendMessage("You executed the command");
+            sender.sendMessage("You executed the base command!");
         });
-
-        // All default arguments are available in the ArgumentType class
-        // Each argument has an identifier which should be unique. It is used internally to create the nodes
-        var numberArgument = ArgumentType.Integer("my-number");
-
-        // Finally, create the syntax with the callback, and an infinite number of arguments
-        addSyntax((sender, context) -> {
-            final int number = context.get(numberArgument);
-            sender.sendMessage("You typed the number " + number);
-        }, numberArgument);
-
     }
 }
 ```
 
-![The command in action](/docs/feature/commands/number-command.png)
-
-## Argument callback
-
-Let's say you have the command "/set \<number>" and the player types "/set text", you would probably like to warn the player that the argument requires a number and not text. This is where argument callbacks come in!
-
-When the command parser detects a wrongly typed argument, it will first check if the given argument has an error callback to execute, if not, the default executor is used.
-
-Here an example checking the correctness of an integer argument:
+To register the command:
 
 ```java
-package demo.commands;
-
-import net.minestom.server.command.builder.Command;
-import net.minestom.server.command.builder.arguments.ArgumentType;
-
-public class TestCommand extends Command {
-
-    public TestCommand() {
-        super("command");
-
-        setDefaultExecutor((sender, context) -> {
-            sender.sendMessage("Usage: /command <number>");
-        });
-
-        var numberArgument = ArgumentType.Integer("my-number");
-
-        // Callback executed if the argument has been wrongly used
-        numberArgument.setCallback((sender, exception) -> {
-            final String input = exception.getInput();
-            sender.sendMessage("The number " + input + " is invalid!");
-        });
-
-        addSyntax((sender, context) -> {
-            final int number = context.get(numberArgument);
-            sender.sendMessage("You typed the number " + number);
-        }, numberArgument);
-
-    }
-}
+MinecraftServer.getCommandManager().register(new MyCommand());
 ```
 
-![Argument callback detecting an invalid number](/docs/feature/commands/number-command-validation.png)
+## Syntaxes
 
-## Command data
-
-One of the very important features of the command API is the fact that every syntax can return optional data. This data is presented in a structure similar to a Map (in fact, it is only a small wrapper around it).
+A "syntax" defines a specific combination of arguments that triggers an executor. You can have multiple syntaxes for a single command.
 
 ```java
+var numberArg = ArgumentType.Integer("number");
+var stringArg = ArgumentType.String("text");
+
+// Syntax: /mycommand <number>
 addSyntax((sender, context) -> {
-    final int number = context.get("number");
-    sender.sendMessage("You typed the number " + number);
+    int num = context.get(numberArg);
+    sender.sendMessage("Number: " + num);
+}, numberArg);
 
-    // Put the argument data into the returned command data
-    context.setReturnData(new CommandData().set("value", number));
-}, Integer("number"));
+// Syntax: /mycommand <number> <text>
+addSyntax((sender, context) -> {
+    int num = context.get(numberArg);
+    String text = context.get(stringArg);
+    sender.sendMessage("Number: " + num + ", Text: " + text);
+}, numberArg, stringArg);
 ```
 
-The data will be created and returned every time the syntax is called. It can then be retrieved from the `CommandResult`. `CommandManager#executeServerCommand(String)` allows you to execute a command as a `ServerSender` (which has the benefit of not printing anything on `CommandSender#sendMessage(String)`, and permit to differentiate this sender from a player or the console).
+## Argument Types
+
+Minestom includes all standard Brigadier arguments and Minecraft-specific ones via the `ArgumentType` factory.
+
+### Basic Types
+- `ArgumentType.Boolean("id")`
+- `ArgumentType.Integer("id")`
+- `ArgumentType.Float("id")`
+- `ArgumentType.String("id")` (Quoted string)
+- `ArgumentType.Word("id")` (Single word)
+- `ArgumentType.StringArray("id")` (Greedy string, takes rest of input)
+- `ArgumentType.Enum("id", MyEnum.class)`
+
+### Minecraft Types
+- `ArgumentType.Entity("id")` (Selectors like @a, @p)
+- `ArgumentType.ItemStack("id")`
+- `ArgumentType.BlockState("id")`
+- `ArgumentType.Component("id")` (JSON text)
+- `ArgumentType.Color("id")`
+- `ArgumentType.Time("id")`
+- `ArgumentType.Particle("id")`
+- `ArgumentType.ResourceLocation("id")`
+- `ArgumentType.IntRange("id")` (e.g., 1..10)
+- `ArgumentType.FloatRange("id")`
+- `ArgumentType.NbtCompound("id")`
+
+## Optional Arguments
+
+Arguments can be marked as optional with a default value.
 
 ```java
-CommandResult result = MinecraftServer.getCommandManager().executeServerCommand("command 5");
-if (result.getType() == CommandResult.Type.SUCCESS) {
-    final CommandData data = result.getCommandData();
-    if (data != null && data.has("value")) {
-        System.out.println("The command gave us the value " + data.get("value"));
-    } else {
-        System.out.println("The command didn't give us any value!");
+var optionalArg = ArgumentType.Integer("number").setDefaultValue(5);
+
+addSyntax((sender, context) -> {
+    // Will return 5 if not provided
+    int num = context.get(optionalArg);
+}, optionalArg);
+```
+
+**Note:** Optional arguments must be placed at the end of the argument list.
+
+## Validation & Callbacks
+
+You can validate arguments before the executor runs using callbacks. This is useful for range checks or custom validation.
+
+```java
+var ageArg = ArgumentType.Integer("age");
+
+ageArg.setCallback((sender, exception) -> {
+    sender.sendMessage("Invalid age inputted: " + exception.getInput());
+});
+```
+
+## Suggestions (Tab Completion)
+
+You can provide custom tab-completions for arguments.
+
+```java
+import net.minestom.server.command.builder.suggestion.SuggestionEntry;
+
+var typeArg = ArgumentType.Word("type");
+
+typeArg.setSuggestionCallback((sender, context, suggestion) -> {
+    suggestion.addEntry(new SuggestionEntry("fast"));
+    suggestion.addEntry(new SuggestionEntry("slow"));
+    suggestion.addEntry(new SuggestionEntry("medium"));
+});
+```
+
+## Command Conditions
+
+Conditions allow you to restrict who can execute a command (e.g., permissions or sender type).
+
+```java
+setCondition((sender, commandString) -> {
+    if (!sender.hasPermission("admin.command")) {
+        sender.sendMessage("You do not have permission!");
+        return false;
     }
-} else {
-    System.out.println("The command didn't work out!");
+    return true;
+});
+```
+
+## Subcommands
+
+You can nest commands to create structures like `/plot claim`, `/plot auto`.
+
+```java
+public class PlotCommand extends Command {
+    public PlotCommand() {
+        super("plot");
+        
+        addSubcommand(new PlotClaimCommand());
+        addSubcommand(new PlotAutoCommand());
+    }
 }
 ```
 
-This tool opens a lot of possibilities, including powerful scripts, remote calls, and an overall easy-to-use interface for all your APIs.
+## Command Data
+
+Syntaxes can return data, which is useful for cross-command communication or scripting.
+
+```java
+import net.minestom.server.command.builder.CommandData;
+
+addSyntax((sender, context) -> {
+    context.setReturnData(new CommandData().set("result", 42));
+}, argument);
+```
+
+Executing explicitly to get data:
+
+```java
+import net.minestom.server.command.builder.CommandResult;
+
+CommandResult result = MinecraftServer.getCommandManager().executeServerCommand("mycommand 10");
+if (result.getType() == CommandResult.Type.SUCCESS) {
+    int value = result.getCommandData().get("result");
+}
+```
+

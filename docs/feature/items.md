@@ -1,74 +1,108 @@
 # Items
 
-## Overview
+Items are a core part of Minecraft, representing objects that can be held, worn, or used. In Minestom, items are represented by the `ItemStack` interface.
 
-Items in Minestom are **immutable**, meaning that an `ItemStack` cannot change after being built. This provides us many benefits:
+## Creating an ItemStack
 
-- Thread safety, as you cannot change the same object from multiple threads.
-- No side effects where a change to an item would modify all inventories where the same object is present.
-- Ability to reuse `ItemStack` in multiple places. For example, if all your players start with the same set of items, you could just store those as constants and add them to each player inventory to avoid a lot of allocation.
-- Related to the second point, it allows us to internally cache items packet (eg: window packet) to keep improving performance
-
-## ItemStack
+The primary way to create an `ItemStack` is using the static factory method `ItemStack.of()`.
 
 ```java
-// Constant air item, should be used instead of 'null
-ItemStack air = ItemStack.AIR;
-// Item with amount set to 1
-ItemStack stone = ItemStack.of(Material.STONE);
-// Item with custom amount
-ItemStack stoneStack = ItemStack.of(Material.STONE, 64);
+import net.minestom.server.item.ItemStack;
+import net.minestom.server.item.Material;
+
+// Basic item
+ItemStack stick = ItemStack.of(Material.STICK);
+
+// Item with amount
+ItemStack diamonds = ItemStack.of(Material.DIAMOND, 64);
 ```
 
-Items are configured using `DataComponent`s, the whole list of components can be found [on the Wiki](https://minecraft.wiki/w/Data_component_format). Components can be added to items using `with`, or removed using `without`.
+## Modifying ItemStacks
+
+`ItemStack` is immutable. Instead of modifying it in place, you create a new instance with the desired changes using methods like `withAmount`, `withMaterial`, or `withTag`.
 
 ```java
-ItemStack item = ItemStack.of(Material.STONE)
-        .with(DataComponents.CUSTOM_NAME, Component.text("Item name!", NamedTextColor.GREEN));
+ItemStack stack = ItemStack.of(Material.IRON_INGOT);
+
+// Change amount
+stack = stack.withAmount(10);
+
+// Use builder for multiple changes
+stack = ItemStack.builder(Material.GOLD_INGOT)
+    .amount(5)
+    .meta(meta -> meta.customName(Component.text("Shiny Gold")))
+    .build();
 ```
 
-However, as items are immutable, creating complex objects is simpler using a builder:
+## Item Meta
+
+Each `ItemStack` holds metadata (NBT) which stores properties like display name, lore, enchantments, and custom tags.
 
 ```java
-item = ItemStack.builder(Material.STONE)
-        .set(DataComponents.CUSTOM_NAME, Component.text("Item name!", NamedTextColor.GREEN))
-        .set(DataComponents.LORE, List.of(Component.text("Line 1"), Component.text("Line 2")))
-        .build();
+import net.kyori.adventure.text.Component;
+import net.kyori.adventure.text.format.NamedTextColor;
 
-// We also provide some utility methods for common components
-item = ItemStack.builder(Material.STONE)
-        .customName(Component.text("Item name!", NamedTextColor.GREEN))
-        .build();
-item = ItemStack.of(Material.STONE)
-        .withCustomName(Component.text("Item name!", NamedTextColor.GREEN))
+ItemStack sword = ItemStack.of(Material.DIAMOND_SWORD)
+    .withCustomName(Component.text("Excalibur", NamedTextColor.GOLD))
+    .withLore(List.of(Component.text("The legendary sword.")));
 ```
 
-Methods exist for creating copies of items as well:
+### Enchantments
+
+You can add enchantments easily.
 
 ```java
-// Set the amount to 5
-item = item.withAmount(5);
-// Set the amount based on the current one
-item = item.withAmount(amount -> amount * 2);
-// Same with various other fields
-item = item.with(DataComponents.CUSTOM_NAME, Component.text("New item name!"));
+import net.minestom.server.item.Enchantment;
 
-// Start rebuilding the item
-// More performant than the above if you need to modify multiple fields
-item = item.with(builder -> {
-        builder.amount(32)
-                .set(DataComponents.CUSTOM_NAME, Component.text("Again..."));
-        });
+ItemStack bow = ItemStack.of(Material.BOW)
+    .withMeta(meta -> meta.enchantment(Enchantment.POWER, 5));
 ```
 
-## Serialization
+### Custom Model Data
 
-Items can be serialized to and from various formats using its `Codec`:
+Useful for resource packs.
 
 ```java
-BinaryTag nbt = ItemStack.CODEC.encode(Transcoder.NBT, item).orElseThrow();
-item = ItemStack.CODEC.decode(Transcoder.NBT, nbt).orElseThrow();
-
-JsonElement json = ItemStack.CODEC.encode(Transcoder.JSON, item).orElseThrow();
-item = ItemStack.CODEC.decode(Transcoder.JSON, json).orElseThrow();
+ItemStack modelItem = ItemStack.of(Material.PAPER)
+    .withMeta(meta -> meta.customModelData(12345));
 ```
+
+## NBT Tags
+
+Items can store arbitrary NBT data using the Tag API.
+
+```java
+import net.minestom.server.tag.Tag;
+
+ItemStack keyInfo = ItemStack.of(Material.TRIPWIRE_HOOK)
+    .withTag(Tag.String("KeyID"), "secret-key-123");
+
+// Reading the tag later
+String id = keyInfo.getTag(Tag.String("KeyID"));
+```
+
+## Material
+
+`Material` is an enum-like interface representing item types.
+
+```java
+Material mat = Material.STONE;
+
+if (mat.isBlock()) {
+    // It can be placed as a block
+}
+```
+
+## Builders
+
+For complex item creation, the builder pattern is cleaner.
+
+```java
+ItemStack powerfulPotion = ItemStack.builder(Material.POTION)
+    .meta(PotionMeta.class, meta -> {
+        meta.potionType(PotionType.STRONG_HEALING);
+    })
+    .amount(1)
+    .build();
+```
+

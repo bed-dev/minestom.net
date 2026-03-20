@@ -1,19 +1,28 @@
----
-description: Allowing the server to show up in the LAN section of the server list.
----
-
 # Open to LAN
 
-By sending a series of packets to a multicast address, Minestom provides the ability to mimic being a single player world that is opened to LAN. This will make it show up in the server list of all open Minecraft instances running in your local network below the "_Scanning for games on your local network_" section.
+Minestom allows you to broadcast your server to the local network, making it appear in the "Lan Worlds" section of the Minecraft client server list.
 
-This does **not** actually open the server to anywhere other than your local network and it is **not** a replacement for port forwarding or a proper network setup. It is mainly designed as a fun feature that can be useful during testing if you're spinning up a dynamic amount of servers and don't want to manually connect to each one of them.
+## Usage
 
-## Setup
+This feature uses `OpenToLAN` utility. Note that this **doesn't** actually open your server port or configure your firewall; it simply broadcasts the "Open to LAN" packet to the local network.
 
-To start sending the required packets, you can simply run `OpenToLAN.open()` anywhere. This will send the ping every 1.5 seconds and call the `ServerListPingEvent` with the `OPEN_TO_LAN` ping type for each outgoing ping.
+```java
+// Open with default configuration
+OpenToLAN.open();
 
-To modify how often the event is called and the pings are sent, pass in a `OpenToLANConfig` in the `open` method. This is a simple builder-style class which lets you configure various elements of the system.
+// Open with custom configuration
+OpenToLAN.open(new OpenToLANConfig()
+    .eventCallDelay(Duration.of(30, TimeUnit.SECOND)) // Delay between ping events
+    .port(25565) // The port to advertise (default is server port)
+);
+```
 
-## Modifying the description
+## Closing
 
-The description is set using the `ServerListPingEvent`. For more information on this, see the [server list ping](events/server-list-ping) page.
+You can stop the broadcasting at any time.
+
+```java
+OpenToLAN.close();
+```
+
+

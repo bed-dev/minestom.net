@@ -2,95 +2,129 @@
 
 ## Overview
 
-A `Block` is an **immutable** object containing:
+A `Block` in Minestom is an **immutable** object. This means if you want to change a property of a block, you get a *new* `Block` object.
 
-- Namespace & protocol id
-- `Map<String, String>` containing properties (e.g. waterlogged)
-- State id which is the numerical id defining the block visual used in chunk packets and a few others
-- Optional nbt
-- A `BlockHandler`
+A block contains:
+- **Registry Data**: The vanilla block type (Namespace & ID).
+- **Properties**: Block states like `facing=north` or `waterlogged=true`.
+- **NBT/Tags**: Custom data attached to the block (Tile Entity data).
+- **BlockHandler**: Custom server-side logic (interaction, placement, tick).
 
-The immutability allows block references to be cached and reused.
-
-## Usage
+## Basic Usage
 
 ```java
-Instance instance = ...;
-// Each vanilla block has a constant visible from the `Block` interface
+import net.minestom.server.instance.block.Block;
+
+// Setting a simple block
 instance.setBlock(0, 40, 0, Block.STONE);
 
-// Retrieve the tnt block and create a new block with the `unstable`
-// property sets to "true".
-// Property names are defined by Mojang and usable in various commands
+// Modifying block state properties
 Block tnt = Block.TNT.withProperty("unstable", "true");
 instance.setBlock(0, 41, 0, tnt);
 ```
 
-## Registry
-
-Each block has unique data which can be retrieved with `Block#registry()`.
+### Retrieving Blocks
 
 ```java
-Block block = Block.GRASS_BLOCK;
-boolean solid = block.registry().isSolid();
+Block block = instance.getBlock(0, 40, 0);
+if (block.compare(Block.STONE)) {
+    // It is stone (ignoring extra data like NBT or handlers)
+}
 ```
 
-## Tags
+## Block Handlers
 
-`Block` implements `TagReadable` meaning that they can contain all kinds of data. (see [Tags](../feature/tags))
+`BlockHandler` allows you to attach custom logic to blocks. This is how you implement custom blocks or override vanilla behavior (like signs, chests, or machines).
 
-```java
-Tag<String> tag = Tag.String("my-key");
-Block tnt = Block.TNT;
-// Create a new block with the tag sets to "my-value"
-tnt = tnt.withTag(tag, "my-value");
-// Retrieve the value from the newly created block
-String value = tnt.getTag(tag);
-
-// Block can also expose a convenient view of their nbt
-CompoundBinaryTag nbt = tnt.nbt();
-```
-
-Tags data can be serialized and will be saved on disk automatically.
-
-:::alert warning
-Tags `id`, `x`, `y`, `z` and `keepPacked` are used by the anvil loader and may cause unexpected behavior when added to blocks.
-:::
-
-## Handlers
-
-The `BlockHandler` interface allows blocks to have behavior by listening to some events like placement or interaction. And can be serialized to disk thanks to their namespace.
+### Creating a Handler
 
 ```java
-public class DemoHandler implements BlockHandler {
+import net.minestom.server.instance.block.BlockHandler;
+import net.kyori.adventure.key.Key;
+
+public class CustomBlockHandler implements BlockHandler {
+
     @Override
-    public void onPlace(@NotNull Placement placement) {
-        if (placement instanceof PlayerPlacement) {
-            // A player placed the block
-        }
-        Block block = placement.getBlock();
-        System.out.println("The block " + block.name() + " has been placed");
+    public Key getNamespaceId() {
+        return Key.key("minestom", "custom_block");
     }
 
     @Override
-    public @NotNull Key getKey() {
-        // Key required for serialization purpose
-        return Key.key("minestom:demo");
+    public void onPlace(Placement placement) {
+        System.out.println("Block placed at " + placement.getBlockPosition());
+    }
+
+    @Override
+    public void onDestroy(Destroy destroy) {
+        System.out.println("Block destroyed");
+    }
+
+    @Override
+    public boolean onInteract(Interaction interaction) {
+        // Return true to cancel the interaction (e.g. preventing block placement if item in hand)
+        interaction.getPlayer().sendMessage("You touched the block!");
+        return false; // False means interaction was successful/handled, true usually cancels generic item use
     }
 }
 ```
 
-You can then decide to use one handler per block, or share it with several.
+### Assigning a Handler
 
 ```java
-Block tnt = Block.TNT;
-// Create a new block with the specified handler.
-// Be aware that block objects can be reused, handlers should
-// therefore never assume to be assigned to a single block.
-tnt = tnt.withHandler(new DemoHandler());
+BlockHandler myHandler = new CustomBlockHandler();
 
-// Share the same handler reference with multiple blocks
-BlockHandler handler = new DemoHandler();
-Block stone = Block.STONE.withHandler(handler);
-Block grass = Block.GRASS_BLOCK.withHandler(handler);
+// We need to register the handler first so Minestom knows it exists for persistence
+MinecraftServer.getBlockManager().registerHandler(myHandler.getNamespaceId(), () -> myHandler);
+
+// Now apply it to a block
+Block customBlock = Block.GOLD_BLOCK.withHandler(myHandler);
+
+instance.setBlock(10, 50, 10, customBlock);
 ```
+
+## Tags (NBT)
+
+You can attach arbitrary NBT data to blocks using the Tag system. This data is saved with the chunk.
+
+```java
+import net.minestom.server.tag.Tag;
+
+Tag<Integer> countTag = Tag.Integer("click_count");
+
+// Increment a counter inside the block
+Block block = instance.getBlock(x, y, z);
+int current = block.getTag(countTag); // Returns 0 (default) if not present
+block = block.withTag(countTag, current + 1);
+
+instance.setBlock(x, y, z, block);
+```
+
+*Note: Since blocks are immutable, `withTag` returns a new block object. You MUST call `setBlock` to update the world.*
+
+## Block Placement Rules
+
+`BlockPlacementRule` defines how a block state is determined when placed (e.g., stairs facing the player).
+
+```java
+import net.minestom.server.instance.block.rule.BlockPlacementRule;
+
+public class MyStairRule extends BlockPlacementRule {
+    public MyStairRule(Block block) {
+        super(block);
+    }
+
+    @Override
+    public Block blockPlace(PlacementState placementState) {
+        // Calculate facing based on player yaw
+        // Return correct block state
+        return block.withProperty("facing", "north");
+    }
+}
+```
+
+This must be registered in the `BlockManager`.
+
+```java
+MinecraftServer.getBlockManager().registerBlockPlacementRule(new MyStairRule(Block.OAK_STAIRS));
+```
+

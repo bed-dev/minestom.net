@@ -1,81 +1,65 @@
-# Player capabilities
+# Player Capabilities
 
-Minestom features a number of interaction methods for players. Many of them are described below, however this list is not exhaustive.
+Minestom provides a direct API to control standard player capabilities like gamemode, flying, and speed.
 
-It is worth reviewing the [Adventure API](adventure) before this, because these systems depend heavily on `Component`.
+## GameMode
 
-## Sidebars (Scoreboards)
-
-`Sidebar`s can be used to display up to 16 lines on a scoreboard for the player. They are created given a title as follows:
+You can change a player's gamemode using `setGameMode`.
 
 ```java
-Sidebar#<init>(Component /* title */);
+import net.minestom.server.entity.GameMode;
+
+player.setGameMode(GameMode.CREATIVE);
 ```
 
-> Sidebar titles do not support JSON chat components, however the provided component will be serialized using Adventure's legacy serializer.
+## Flying
 
-Once created, a scoreboard can be added and removed from players as follows:
+To allow a player to fly (double-jump) and to set them flying:
 
 ```java
-Sidebar#addViewer(Player);
-Sidebar#removeViewer(Player);
+// Allow the player to toggle flight
+player.setAllowFlying(true);
+
+// Force the player to fly
+player.setFlying(true);
 ```
 
-### Sidebar Line
+## Speed
 
-Lines on a sidebar are made up of `ScoreboardLine`s. They render on the scoreboard in order of their line number (score), where the vertically highest line represents the highest line number (score). If two lines have the same line number (score), they will be sorted alphabetically.
-
-`ScoreboardLine`s can be created using their constructor:
+You can adjust walking and flying speeds.
 
 ```java
-Sidebar.ScoreboardLine#<init>(String /* unique id*/, Component /* content */, int /* line */);
+// Default is usually around 0.1 for walking
+player.getAttribute(Attribute.MOVEMENT_SPEED).setBaseValue(0.2f);
 
-// For example
-Sidebar.ScoreboardLine line = new Sidebar.ScoreboardLine(
-        "some_line_0",
-        Component.text("Hello, Sidebar!", NamedTextColor.RED),
-        0
-);
+// Flying speed
+player.setFlyingSpeed(0.1f);
 ```
 
-Once created, scoreboard lines may be added to `Sidebar`s as follows:
+## Food and Saturation
+
+Hunger management is mostly manual or handled by extensions, but the data storage is built-in.
 
 ```java
-Sidebar#createLine(Sidebar.ScoreboardLine);
+player.setFood(20);
+player.setFoodSaturation(5.0f);
 ```
 
-Lines are indexed by their unique id, and can be modified with it:
+### Permission Level
+
+To set the operator permission level (0-4), which affects vanilla command access client-side (and command blocks).
 
 ```java
-Sidebar#getLine(String /* unique id */);
-Sidebar#updateLineContent(String /* unique id */, Component /* new content */);
-Sidebar#updateLineScore(String /* unique id */, Int /* new score */);
+player.setPermissionLevel(4);
 ```
 
-## Notifications
+## Resource Packs
 
-`Notification`s are a system to send advancement completion toasts to a player as a form of communication.
-
-They are a wrapper around `Advancement`, so you do not need to create any advancements to use them, just a `Notification`. See the [Advancements](advancements) page for more information on advancements.
+You can send resource packs to players.
 
 ```java
-Notification#<init>(Component /* title */, FrameType, ItemStack /* icon */);
+import net.minestom.server.resourcepack.ResourcePack;
 
-// For example
-Notification notification = new Notification(
-        Component.text("Hello, Notifications!", NamedTextColor.GREEN),
-        FrameType.GOAL,
-        ItemStack.of(Material.GOLD_INGOT)
-);
+player.setResourcePack(ResourcePack.forced("https://example.com/pack.zip", "hash"));
 ```
 
-To send the notification, use `Player#sendNotification` or `PacketGroupingAudience#sendNotification`
-
-```java
-Player#sendNotification(Notification);
-PacketGroupingAudience#sendNotification(Notification);
-```
-
-The example renders as the following:
-
-![](/docs/feature/player-capabilities/notification.png)
