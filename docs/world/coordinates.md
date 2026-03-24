@@ -1,62 +1,81 @@
 # Coordinates
 
-## Overview
+Minestom uses distinct types for different coordinate systems to ensure type safety and clarity. All coordinate objects are **immutable**.
 
-All coordinates classes in Minestom are immutables (like a lot of others), `Point` being the common interface, and the implementations `Pos`, `Vec` and `BlockVec`.
+## Point Interface
 
-`Pos` contains the 3 coordinates + yaw/pitch for the view, `Vec` contains the x, y & z coordinates and adds a few vector methods, `BlockVec` contains block x, y & z coordinates. `Point` should be used when the type does not matter.
+`Point` is the common interface for all 3D coordinates. It provides basic accessors `x()`, `y()`, `z()` and common math operations.
 
-## Immutability performance
-
-Some may express concern about the performance penalty of using immutable classes for math. Here is our reasoning:
-
-* Immutability give us the guarantee that coordinate objects can be reused, reducing allocation
-* [Scalar replacement](https://shipilev.net/jvm/anatomy-quarks/18-scalar-replacement/) may happen in some specific situation (builder mode)
-* [Primitive objects](https://openjdk.java.net/jeps/401) will ultimately arrive, removing the concern altogether and improving performance compared to the mutable equivalent
-
-## API
-
-### Initialization
-
-All coordinates can be created using their respective constructors
-
-```java
-Vec vec1 = new Vec(3, 0, 1); // [3;0;1] -> x;y;z
-Vec vec2 = new Vec(1, 1); // [1;0;1]
-Vec vec3 = new Vec(5); // [5;5;5]
-
-Pos pos1 = new Pos(1,2,3,4,5); // [1;2;3;4;5] -> x;y;z;yaw;pitch
-Pos pos2 = new Pos(1,2,3); // [1;2;3;0;0]
-Pos pos3 = new Pos(new Vec(1)); // [1;1;1;0;0]
-Pos pos4 = new Pos(new Vec(1),2,3); // [1;1;1;2;3]
-```
+## Coordinate Types
 
 ### Vec
 
+`Vec` represents a 3D vector or position in the world (doubles). It is used for velocity, offsets, and generic positioning.
+
 ```java
-Vec vec = new Vec(1, 2, 1);
-vec = vec.add(0, 5, 0) // add 5 y
-   .apply(Vec.Operator.FLOOR) // floor all coordinates
-   .neg() // -x -y -z
-   .withX(x -> x * 2); // double x
+import net.minestom.server.coordinate.Vec;
+
+Vec velocity = new Vec(0, 10.5, 0);
+Vec position = new Vec(100, 64, -100);
+
+// Math operations
+Vec target = position.add(5, 0, 5).mul(2);
+double distance = position.distance(target);
 ```
 
 ### Pos
 
-Very similar to `Vec`.
+`Pos` represents a position that includes rotation (Yaw and Pitch). It is primarily used for entities.
 
 ```java
-Pos pos = new Pos(0, 0, 0);
-pos = pos.withView(50, 90)
-        .add(0, 5, 0)
-        .mul(5);
+import net.minestom.server.coordinate.Pos;
+
+// x, y, z, yaw, pitch
+Pos spawn = new Pos(0, 42, 0, 90f, 0f);
+
+// Conversions
+Vec asVector = spawn.asVec(); // Drops rotation
+Pos lookedAt = spawn.withLookAt(targetPoint);
 ```
 
-### Block coordinates
+### BlockVec
+
+`BlockVec` represents integer coordinates, mainly used for block positions.
 
 ```java
-Point point = new Vec(1);
-final int blockX = point.blockX();
-final int blockY = point.blockY();
-final int blockZ = point.blockZ();
+import net.minestom.server.coordinate.BlockVec;
+
+BlockVec blockPos = new BlockVec(10, 64, 10);
+
+// Automatic flooring
+BlockVec fromDouble = new BlockVec(10.5, 64.9, 10.1); // becomes 10, 64, 10
 ```
+
+## Operations
+
+All coordinate types support chaining operations.
+
+```java
+Point result = new Vec(0, 0, 0)
+    .add(10, 5, 10)
+    .sub(0, 5, 0)
+    .div(2)
+    .normalize();
+```
+
+### Helper Methods
+
+The `CoordConversion` class provides helpers for converting between chunk, block, and loose coordinates.
+
+```java
+import net.minestom.server.coordinate.CoordConversion;
+
+int chunkX = CoordConversion.globalToChunk(blockX);
+int index = CoordConversion.chunkBlockIndex(x, y, z);
+```
+
+## Immutability & Performance
+
+Since all coordinate objects are immutable, operations like `add()` create new instances. While this might seem expensive, the JVM (HotSpot) is very good at scalar replacement for short-lived objects.
+
+You should never try to manually pool these objects. Trust the JVM.

@@ -1,87 +1,105 @@
-# Inventories
+# Inventory
 
-Minestom has an improved inventory system! This includes vanilla accurate click behaviour (except in cases like crafting), an improved inventory event API, and a few other changes.
+Inventories in Minestom are containers for items. They can be viewed by players and come in various types (Chest, Hopper, Player Inventory, etc.).
 
-## Usage
+Minestom has two main inventory implementations:
+- `PlayerInventory`: A player's personal inventory (Hotbar, Main Inventory,Armor, Offhand).
+- `Inventory`: A generic inventory (Chest, Furnace, etc.) that can be viewed by multiple players.
 
-In order to create an inventory, you can simply call its constructor by specifying an InventoryType and the title.
+## Player Inventory
 
-```java
-// Create the inventory
-ContainerInventory inventory = new ContainerInventory(InventoryType.CHEST_1_ROW, Component.text("Title"));
-
-// Open the inventory for the player
-// (Opening the same inventory for multiple players would result in a shared interface)
-player.openInventory(inventory);
-
-// Close the current player inventory
-player.closeInventory();
-```
-
-Adding callbacks are as simple as registering a listener to an EventNode
+Each `Player` has a personal inventory, accessible via `player.getInventory()`.
 
 ```java
-EventNode.type("click", EventFilter.INVENTORY, (event, inv) -> inventory == inv)
-.addListener(InventoryClickEvent.class, event -> {
-	event.getPlayer().sendMessage("Clicked!");
-})
+import net.minestom.server.inventory.PlayerInventory;
+import net.minestom.server.item.ItemStack;
+import net.minestom.server.item.Material;
+
+PlayerInventory inventory = player.getInventory();
+
+// Set an item in the main hand
+inventory.setItemInMainHand(ItemStack.of(Material.DIAMOND_SWORD));
+
+// Set armor
+inventory.setHelmet(ItemStack.of(Material.DIAMOND_HELMET));
+inventory.setChestplate(ItemStack.of(Material.DIAMOND_CHESTPLATE));
 ```
 
-## Recent Changes
+## Creating a GUI (Generic Inventory)
 
-- Inventory classes have been renamed. `AbstractInventory` is now `Inventory`, and what was `Inventory` is now `ContainerInventory`. This makes the hierarchy a bit clearer. To be clear, `ContainerInventory` represents all named inventories (e.g. chest inventories, anvil inventories, crafting inventories).
+You can create custom inventories (chests, furnaces, etc.) and show them to players.
 
-- Click events with `#getClickedItem()`, `#getClickType()`, `#getSlot()`, etc. have been replaced with the `Click.Info` type. This is an interface permitting a bunch of subclasses, including `Left`, `Right`, `RightShift`, etc., each storing the relevant slots. When listening to an event, you can simply check the click type:
-  `if (event.getClickInfo() instanceof Click.Info.Left left) { /* logic */ }`
+```java
+import net.minestom.server.inventory.Inventory;
+import net.minestom.server.inventory.InventoryType;
+import net.kyori.adventure.text.Component;
 
-- Inventory click events have been refactored to the following structure:
+// Create a chest inventory with a title
+Inventory myInventory = new Inventory(InventoryType.CHEST_3_ROW, Component.text("My Loot"));
 
-  - InventoryPreClickEvent
-    - Allows modification of the raw information about the click (e.g. clicked slots, click type, which button was used, etc.) via `event.getClickInfo()`.
-    - This occurs before the click is processed.
-  - InventoryClickEvent
-    - Allows modification of the slot changes and side effects that occur as result of the click via `event.getChanges()` instead of just the click info.
-    - This occurs before the click is processed.
-  - InventoryPostClickEvent
-    - Allows viewing the click info and results for the click, but cannot modify them.
-    - This occurs after the click is processed.
-
-- When the player clicks while their own inventory is open, the `event.getInventory()` in each event is now the player's inventory. Previously, it was `null`.
-
-- `InventorySwapItemEvent` is now considered a click, so you can listen to click events that have `event.getClickInfo() instanceof OffhandSwap`.
-
-- `InventoryCloseEvent` no longer has `#setNewInventory(Inventory)`. Instead, use `event.getPlayer().openInventory` or `event.setCancelled(true)` when needed.
-
-- `PlayerInventoryItemChangeEvent` is now under `InventoryItemChangeEvent`. Filter the event if you want only `PlayerInventory` instances.
-
-- `InventoryClickEvent` has been renamed to `InventoryPostClickEvent`
-- `InventoryCondition` has been converted into an event.
-
-  ```Java
-  // Old
-  inventory.addInventoryCondition((player, slot, clickType, inventoryConditionResult) -> {
-  	player.sendMessage("Clicked!");
-  });
-
-  // New
-  EventNode.type("click", EventFilter.INVENTORY, (event, inv) -> inventory == inv)
-  .addListener(InventoryClickEvent.class, event -> {
-  	event.getPlayer().sendMessage("Clicked!");
-  })
-  ```
-
-## Click.Info
-
-Click slots in `Click.Info` are stored in an unintuitive manner. The slot IDs represent both clicked inventory slots and player inventory slots. To get an item from a slot ID, you can use this code:
-
-```Java
-Inventory inventory = event.getInventory();
-if (slot < inventory.getSize()) {
-    return inventory.getItemStack(slot);
-} else {
-    int converted = PlayerInventoryUtils.protocolToMinestom(slot, inventory.getSize());
-    return event.getPlayerInventory().getItemStack(converted);
-}
+// Open it for a player
+player.openInventory(myInventory);
 ```
 
-Let [@GoldenStack](https://github.com/GoldenStack) know if you have a better idea for handling this.
+### Adding Items
+
+Items are set using slot indices, which start at 0.
+
+```java
+myInventory.setItemStack(0, ItemStack.of(Material.GOLD_INGOT));
+```
+
+### Click Handling
+
+You can listen to clicks globally or per inventory. The most common way is via `addInventoryCondition`.
+
+```java
+myInventory.addInventoryCondition((player, slot, clickType, result) -> {
+    // Cancel all clicks in this inventory to make it read-only
+    result.setCancel(true);
+    
+    // Check specific slot action
+    if (slot == 0) {
+        player.sendMessage("You clicked the gold!");
+        player.closeInventory();
+    }
+});
+```
+
+## Inventory Types
+
+Minestom supports all vanilla inventory types:
+
+- **Chests:** `CHEST_1_ROW`, `CHEST_2_ROW`, `CHEST_3_ROW`, `CHEST_4_ROW`, `CHEST_5_ROW`, `CHEST_6_ROW`
+- **Utility:** `HOPPER`, `BREWING_STAND`, `BEACON`
+- **Station:** `ANVIL`, `SMITHING`, `CARTOGRAPHY`, `GRINDSTONE`, `STONECUTTER`, `LOOM`, `CRAFTING`
+- **Furnace:** `FURNACE`, `BLAST_FURNACE`, `SMOKER`
+- **Dispenser/Dropper:** `WINDOW_3X3`
+- **Merchant:** `VILLAGER`
+
+## Listeners
+
+You can add listeners for when the inventory is opened or closed by players.
+
+```java
+myInventory.addViewer(player); // Only adds them to viewers list (usually handled by openInventory)
+
+// Callbacks
+myInventory.addOpenListener(player -> {
+    // Player opened inventory
+});
+
+myInventory.addCloseListener(player -> {
+    // Player closed inventory
+});
+```
+
+## Updating the Inventory
+
+Similar to blocks and scoreboards, modifications to the inventory are immediately sent to all viewers.
+
+```java
+// Updates for everyone looking at it
+myInventory.setItemStack(5, ItemStack.of(Material.APPLE));
+```
+

@@ -1,140 +1,125 @@
-# Generation
+# World Generation
 
-## Basics
+Minestom provides a flexible API to generate worlds, ranging from flat worlds to complex terrain with biomes.
 
-Each `Instance` has an optional `Generator` that is responsible for generating areas of various sizes.
+## The Generator Interface
 
-The area size is abstracted as a `GenerationUnit` representing an aggregate of sections, the generator then has the ability to place blocks (and biomes) using relative and absolute coordinates. The dynamically sized area allows the API to be more flexible, and allows the instance to choose whether to generate full chunks at once or section by section without changing the generator.
-
-Generation tasks are currently forwarded to the common JDK pool. Virtual threads will be used once Project Loom is integrated into the mainline.
-
-## Your first flat world
-
-Here is the naive way of generating a flat world from y=0 to y=40
+The entry point for world generation is the `Generator` interface.
 
 ```java
-Instance instance = ...;
-instance.setGenerator(unit -> {
-    final Point start = unit.absoluteStart();
-    final Point size = unit.size();
-    for (int x = 0; x < size.blockX(); x++) {
-        for (int z = 0; z < size.blockZ(); z++) {
-            for (int y = 0; y < Math.min(40 - start.blockY(), size.blockY()); y++) {
-                unit.modifier().setBlock(start.add(x, y, z), Block.STONE);
+@FunctionalInterface
+public interface Generator {
+    void generate(GenerationUnit unit);
+}
+```
+
+This functional interface receives a `GenerationUnit`, which represents a section (16x16x16 chunk area) or a full chunk that needs to be generated.
+
+### Basic Example: Flat World
+
+```java
+import net.minestom.server.instance.generator.Generator;
+import net.minestom.server.instance.generator.GenerationUnit;
+import net.minestom.server.instance.block.Block;
+
+public class FlatGenerator implements Generator {
+    @Override
+    public void generate(GenerationUnit unit) {
+        unit.modifier().fillHeight(0, 64, Block.GRASS_BLOCK);
+    }
+}
+```
+
+## GenerationUnit and Modifiers
+
+The `GenerationUnit` allows you to request a `UnitModifier` via `unit.modifier()`. This modifier provides optimized methods for batch block and biome placement.
+
+### Modifying Blocks
+
+```java
+UnitModifier modifier = unit.modifier();
+
+// Fill entire unit
+modifier.fill(Block.STONE);
+
+// Fill up to specific height (useful for terrain)
+modifier.fillHeight(0, 60, Block.STONE);
+
+// Set single block relative to unit start
+modifier.setRelative(0, 0, 0, Block.BEDROCK);
+
+// Set all blocks based on a function (x, y, z -> Block)
+modifier.setAll((x, y, z) -> {
+    if (y < 10) return Block.BEDROCK;
+    if (y < 60) return Block.STONE;
+    return Block.AIR;
+});
+```
+
+### Modifying Biomes
+
+You can also set biomes for the unit.
+
+```java
+import net.minestom.server.world.biome.Biome;
+
+// Fill entire unit with a single biome
+modifier.fillBiome(Biome.PLAINS);
+
+// Set biome based on function (x, y, z -> Biome)
+modifier.setAllBiomes((x, y, z) -> {
+    return (x > 100) ? Biome.DESERT : Biome.PLAINS;
+});
+```
+
+*Note: Since biome data is stored in 4x4x4 quart-blocks (in 1.18+), precision might be lower than block-level.*
+
+## Subdivision
+
+For large-scale generation, a `GenerationUnit` can be subdivided into smaller units.
+
+```java
+List<GenerationUnit> subUnits = unit.subdivide();
+for (GenerationUnit sub : subUnits) {
+    // Process sub-unit independently (can be parallelized)
+}
+```
+
+## Assigning a Generator to an Instance
+
+You must set the generator when creating the `InstanceContainer`.
+
+```java
+InstanceContainer instance = instanceManager.createInstanceContainer();
+instance.setGenerator(new FlatGenerator());
+```
+
+## Custom Noise and Terrain
+
+Minestom does not provide noise libraries (like Perlin or Simplex) by default in the core, but you can use external libraries or implement your own math.
+
+```java
+public class NoiseGenerator implements Generator {
+    @Override
+    public void generate(GenerationUnit unit) {
+        Point start = unit.absoluteStart();
+        UnitModifier modifier = unit.modifier();
+
+        modifier.setAll((x, y, z) -> {
+            int absX = start.blockX() + x;
+            int absY = start.blockY() + y;
+            int absZ = start.blockZ() + z;
+
+            // Simplified noise logic
+            double height = Math.sin(absX * 0.1) * 10 + 64; 
+            
+            if (absY < height) {
+                return Block.STONE;
+            } else if (absY < 64) {
+                 return Block.WATER;
             }
-        }
+            return Block.AIR;
+        });
     }
-});
+}
 ```
-
-`GenerationUnit#absoluteStart` returns the lowest coordinate of the unit which is useful for absolute placements. Now, we can heavily simplify the code by using one of our hand-optimized methods:
-
-```java
-Instance instance = ...;
-instance.setGenerator(unit -> unit.modifier().fillHeight(0, 40, Block.STONE));
-```
-
-## Modifying over unit borders
-
-Modification over the border of a `GenerationUnit` cannot be done without extra steps. `GenerationUnit`s cannot be resized during generation, instead we need to create a new `GenerationUnit` that encloses the area around our target blocks. We can do this through the `GenerationUnit#fork` methods.
-
-Forked units are designed to be placed into the instance whenever it is possible to do so. This eliminates any section bordering issues that may arise.
-
-There are two fork methods, both useful in their own ways. Here is a simple example of adding a structure (snowman):\
-
-```java
-Instance instance = ...;
-instance.setGenerator(unit -> {
-    Random random = ...;
-    Point start = unit.absoluteStart();
-
-    // Create a snow carpet for the snowmen
-    unit.modifier().fillHeight(-64, -60, Block.SNOW);
-
-    // Exit out if unit is not the bottom unit, and exit 5 in 6 times otherwise
-    if (start.y() > -64 || random.nextInt(6) != 0) {
-        return;
-    }
-
-    // Let's fork this section to add our tall snowman.
-    // We add two extra sections worth of space to this fork to fit the snowman.
-    GenerationUnit fork = unit.fork(start, start.add(16, 32, 16));
-
-    // Now we add the snowman to the fork
-    fork.modifier().fill(start, start.add(3, 19, 3), Block.POWDER_SNOW);
-    fork.modifier().setBlock(start.add(1, 19, 1), Block.JACK_O_LANTERN);
-});
-```
-
-Adding structures using forks is trivial.\
-However, for this `GenerationUnit#fork` method, you must know how large these structures are beforehand. To alleviate this condition, there is an alternative `GenerationUnit#fork` method that gives access to a direct `Block.Setter`. This `Block.Setter` automatically adjusts the fork's size depending on the blocks you set using it.\
-\
-Here is the same example written with the `Block.Setter` utility:
-
-```java
-Instance instance = ...;
-instance.setGenerator(unit -> {
-    Random random = ...;
-    Point start = unit.absoluteStart();
-
-    // Create a snow carpet for the snowmen
-    unit.modifier().fillHeight(-64, -60, Block.SNOW);
-
-    // Exit out if unit is not the bottom unit or 5 in 6 times
-    if (start.y() > -64 || random.nextInt(6) != 0) {
-        return;
-    }
-
-    // Add the snowman
-    unit.fork(setter -> {
-        for (int x = 0; x < 3; x++) {
-            for (int y = 0; y < 19; y++) {
-                for (int z = 0; z < 3; z++) {
-                    setter.setBlock(start.add(x, y, z), Block.POWDER_SNOW);
-                }
-            }
-        }
-        setter.setBlock(start.add(1, 19, 1), Block.JACK_O_LANTERN);
-    });
-});
-```
-
-These examples will generate a flat snow world with chunky snowmen scattered throughout, cleanly applying the snowmen whenever it is possible to do so.
-
-![](/docs/world/generation/snowmen-terrain.png)
-
-Example with missing terrain for clarity:
-
-![](/docs/world/generation/snowmen.png)
-
-## Heightmaps with JNoise
-
-This example shows a simple approach to building heightmaps using JNoise, this can be expanded to other noise implementations as well.
-
-```java
-// Noise used for the height
-JNoise noise = JNoise.newBuilder()
-        .fastSimplex(FastSimplexNoiseGenerator.newBuilder().build())
-        .scale(0.005) // Low frequency for smooth terrain
-        .build();
-
-// Set the Generator
-instance.setGenerator(unit -> {
-    Point start = unit.absoluteStart();
-    for (int x = 0; x < unit.size().x(); x++) {
-        for (int z = 0; z < unit.size().z(); z++) {
-            Point bottom = start.add(x, 0, z);
-
-            synchronized (noise) { // Synchronization is necessary for JNoise
-                double height = noise.evaluateNoise(bottom.x(), bottom.z()) * 16;
-                // * 16 means the height will be between -16 and +16
-                unit.modifier().fill(bottom, bottom.add(1, 0, 1).withY(height), Block.STONE);
-            }
-        }
-    }
-});
-```
-
-Here's an example of what that looks like:
-
-![](/docs/world/generation/jnoise.png)

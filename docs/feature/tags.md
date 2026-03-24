@@ -2,52 +2,107 @@
 
 ## Overview
 
-A `Tag` represents a key, and a way to read/write a specific type of data. Generally exposed as a constant, you can use it to apply or read data from any `TagReadable` (e.g. `Entity`, `ItemStack`, and soon `Block`). They are implemented using NBT, meaning that applying a tag to an `ItemStack` will modify its NBT, same for `Block`, and can therefore be sent to the client.
+A `Tag` represents a key-value pair that can be attached to any `TagReadable` object (like `Entity`, `ItemStack`, `Block`, `Instance`). This data is backed by NBT and is automatically serialized/deserialized.
+
+Using Tags is the standard way to attach custom data to objects in Minestom.
 
 ```java
-Tag<String> myTag = Tag.String("key");
-Entity entity = ...;
-String data = entity.getTag(myTag);
+import net.minestom.server.tag.Tag;
+
+Tag<Integer> moneyTag = Tag.Integer("money");
+player.setTag(moneyTag, 100);
+
+int currentMoney = player.getTag(moneyTag);
 ```
 
-Tags benefit are:
+## Creating Tags
 
-* Control writability and readability independently with `TagReadable`/`TagWritable`, ideal for immutable classes.
-* Hidden conversion complexity, your code should not have to worry about how a `List<ItemStack>` is serialized.
-* Automatic serialization support (as backed by NBT), easing data persistence and debuggability.
+All tags are created via static factory methods in the `Tag` class.
 
-## API
-
-First of all, it is recommended to expose Tags as constant and reused. All `Tag` methods should be pure, and allow to specify additional information to handle the data.
-
-All tags are available as static factory methods inside the `Tag` class.
-
-#### Map
-
-Tag mapping allows you to transform the retrieved value.
+### Basic Types
 
 ```java
-Tag<String> stringTag = Tag.String("my-string");
-// You should also ensure that the string is a valid uuid!
-Tag<UUID> mappedTag = stringTag.map(UUID::fromString, UUID::toString);
-UUID uuid = instance.getTag(mappedTag);
+Tag<Integer> intTag = Tag.Integer("my_int");
+Tag<String> stringTag = Tag.String("my_string");
+Tag<Double> doubleTag = Tag.Double("my_double");
+Tag<Boolean> boolTag = Tag.Boolean("my_bool"); // Stored as byte 0/1
 ```
 
-#### Default value
+### Complex Types (NBT)
 
 ```java
-Tag<String> stringTag = Tag.String("my-string");
-instance.getTag(stringTag.defaultValue("default"));
+// Stores an entire NBT Compound
+Tag<CompoundBinaryTag> nbtTag = Tag.NBT("my_nbt");
+
+// Stores a list of strings
+Tag<List<String>> listTag = Tag.String("my_list_strings").list();
 ```
 
-#### TagSerializer
+### Custom Types (Mapping)
 
-`TagSerializer` is similar to the `#map` method, except that you can interact with multiple tags.
+You can map any complex object to a simpler tag type (like NBT or String).
 
-#### Structure
+```java
+public class MyObject {
+    public String name;
+    public int value;
 
-A structure tag is a wrapper around a nbt compound (map) independent of all the other tags.
+    // Serialization logic
+    public static MyObject fromNBT(CompoundBinaryTag nbt) { ... }
+    public CompoundBinaryTag toNBT() { ... }
+}
 
-#### View
+Tag<MyObject> myObjectTag = Tag.Structure(
+    "my_object",
+    context -> MyObject.fromNBT(context), // Reader
+    (context, obj) -> obj.toNBT()         // Writer
+);
+```
 
-A view can access every tag and is therefore mostly unsafe, should only be used at last resort.
+Or simpler mapping:
+
+```java
+// Map UUID <-> String
+Tag<UUID> uuidTag = Tag.String("my_uuid")
+    .map(UUID::fromString, UUID::toString);
+```
+
+## Tag Handlers
+
+You can create standalone `TagHandler` objects to store tags without attaching them to a game object.
+
+```java
+import net.minestom.server.tag.TagHandler;
+
+TagHandler handler = TagHandler.newHandler();
+handler.setTag(Tag.String("key"), "value");
+
+// Convert to NBT
+CompoundBinaryTag nbt = handler.asCompound();
+```
+
+## Default Values
+
+You can provide a default value to be returned if the tag is missing.
+
+```java
+Tag<Integer> scoreTag = Tag.Integer("score").defaultValue(0);
+
+// Returns 0 if "score" is not set
+int score = player.getTag(scoreTag);
+```
+
+## Structure Tags
+
+Structures allow you to group multiple tags under a single namespace (NBT Compound).
+
+```java
+// Define a structure
+Tag<CompoundBinaryTag> stats = Tag.Structure("stats", 
+    Tag.Integer("kills"),
+    Tag.Integer("deaths")
+);
+
+// This creates an NBT structure like:
+// { "stats": { "kills": 10, "deaths": 5 } }
+```

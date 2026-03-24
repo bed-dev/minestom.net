@@ -1,60 +1,40 @@
-# Player skin
+# Player Skin
 
-There are three ways of defining a player skin:
+You can change a player's skin using the `PlayerSkin` record.
 
-- Setting your player UUID (see [here](player-uuid)) to their Mojang UUID, clients by default retrieve the skin based on this value. This is done automatically by `MojangAuth.init()`
-- Changing it in the `PlayerSkinInitEvent` event
-- Using the method `Player#setSkin(PlayerSkin)`
+## Creating a Skin
 
-## How to retrieve skin data from Mojang
-
-### Using PlayerSkin methods
-
-`PlayerSkin` offers some utils methods to retrieve a skin using simple information such as a Mojang UUID or a Minecraft username
+Skins are defined by their texture value and signature (from Mojang's API).
 
 ```java
-PlayerSkin skinFromUUID = PlayerSkin.fromUuid(MOJANG_UUID_AS_STRING);
+import net.minestom.server.entity.PlayerSkin;
 
-PlayerSkin skinFromUsername = PlayerSkin.fromUsername("Notch");
+PlayerSkin skin = new PlayerSkin("texture_value_base64", "signature_base64");
 ```
 
-:::alert warning
-Those methods make direct requests to the Mojang API, it is recommended to cache the values.
-:::
+## Retrieving a Skin
 
-### Retrieve texture value & signature manually
+To get a skin from a username, you usually need to query Mojang's session server. Minestom has a utility for this: `PlayerSkin.fromUsername(String)`.
 
-Most of what I will say is described here: [https://wiki.vg/Mojang_API#Username\_-.3E_UUID_at_time](https://wiki.vg/Mojang_API#Username_-.3E_UUID_at_time)
-
-You firstly need to get your Mojang UUID, which can be done by a request based on your username:
-
-```
- GET https://api.mojang.com/users/profiles/minecraft/<username>
-```
-
-Then, after getting your UUID:
-
-```
- GET https://sessionserver.mojang.com/session/minecraft/profile/<uuid>?unsigned=false
-```
-
-You'll get here both the texture value and the signature. Those values are used to create a `PlayerSkin`.
-
-### PlayerSkinInitEvent
-
-The event is called at the player connection and is used to define the skin to send to the player the first time. It is as simple as
+**Note:** This method is blocking (performs HTTP request). Do not call it on the main thread!
 
 ```java
-GlobalEventHandler globalEventHandler = MinecraftServer.getGlobalEventHandler();
-globalEventHandler.addListener(PlayerSkinInitEvent.class, event -> {
-   PlayerSkin skin = new PlayerSkin(textureValue, signature);
-   event.setSkin(skin);
+import net.minestom.server.entity.PlayerSkin;
+
+// Async fetch
+CompletableFuture.runAsync(() -> {
+    PlayerSkin skin = PlayerSkin.fromUsername("Notch");
+    if (skin != null) {
+        player.setSkin(skin);
+    }
 });
 ```
 
-### Player#setSkin
+## Applying to Player
 
 ```java
-PlayerSkin skin = new PlayerSkin(textureValue, signature);
 player.setSkin(skin);
 ```
+
+This will automatically refresh the player for all viewers (and themselves).
+
