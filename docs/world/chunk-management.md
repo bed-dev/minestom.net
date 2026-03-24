@@ -18,7 +18,7 @@ When trying to save a chunk, [ChunkLoader#saveChunk](<https://javadoc.minestom.n
 
 ### Default behavior
 
-`AnvilLoader` is the default chunk loader used by all `InstanceContainer`
+`NoopChunkLoader` is the default chunk loader used by all `InstanceContainer`
 
 ## Create your own chunk type
 
